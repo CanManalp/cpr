@@ -1,6 +1,6 @@
 # cpr
 
-A fast file and directory copy tool with exclude pattern support. Built because `Copy-Item` doesn't have one.
+A file and directory copy tool with `--exclude` support. Built because PowerShell's `Copy-Item` doesn't have one.
 
 ## Installation
 
