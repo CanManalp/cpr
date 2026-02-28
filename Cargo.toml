@@ -1,0 +1,11 @@
+[package]
+name = "cpr"
+version = "0.1.0"
+edition = "2024"
+description = "A better file copy tool for the command line"
+license = "MIT"
+authors = ["Can Manalp"]
+repository = "https://github.com/canmanalp/cpr"
+
+[dependencies]
+clap = { version = "4.5.60", features = ["derive"] }
