@@ -35,10 +35,7 @@ cargo run -- src dst -e .git   # quick test
 
 Improvements to make one by one (in priority order):
 
-### 1. Code cleanup
-- Remove commented-out code (lines 31-41 in main.rs)
-- Remove unused `use std::vec` import
-- Move `copy_dir` and `matches_pattern` out of `main()` to top-level functions
+### ~~1. Code cleanup~~ (done)
 
 ### 2. Fix silent error swallowing
 - `copy_dir` prints individual file errors but returns `Ok` with partial byte count

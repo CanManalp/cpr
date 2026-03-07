@@ -15,6 +15,9 @@ struct Args {
     /// Comma-seperated patterns to exclude
     #[arg(short, long)]
     exclude: Option<String>,
+    /// Skip confirmation prompt for directory copies
+    #[arg(short, long)]
+    yes: bool,
 }
 
 fn main() {
@@ -26,14 +29,27 @@ fn main() {
         Some(e) => e.split(',').collect(),
         None => vec![],
     };
-    if source_path.is_dir() {
-        println!("Copy directory '{}' and all contents? (y/n)", args.source);
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
+    let yes = args.yes;
 
-        if input.trim() == "y" {
+    if source_path.is_dir() {
+        let mut input = String::new();
+        if !yes {
+            println!("Copy directory '{}' and all contents? (y/n)", args.source);
+            io::stdin().read_line(&mut input).unwrap();
+        }
+
+        if input.trim() == "y" || yes {
             match copy_dir(source_path, dest_path, &excludes) {
-                Ok(bytes) => println!("Total Bytes Copied = {}", bytes),
+                Ok(copy_result) => {
+                    println!("Total Bytes Copied = {}", copy_result.bytes_copied);
+                    println!("Total Files Copied = {}", copy_result.files_copied);
+                    println!("Total Files Excluded = {}", copy_result.files_excluded);
+                    if !copy_result.errors.is_empty() {
+                        for err in copy_result.errors {
+                            println!("Error: {}", err)
+                        }
+                    }
+                }
                 Err(e) => println!("Error: {}", e),
             }
         } else {
@@ -55,9 +71,25 @@ fn main() {
     }
 }
 
-fn copy_dir(source: &Path, destination: &Path, exclude: &[&str]) -> Result<u64, std::io::Error> {
+struct CopyResult {
+    bytes_copied: u64,
+    files_copied: u64,
+    files_excluded: u64,
+    errors: Vec<String>,
+}
+
+fn copy_dir(
+    source: &Path,
+    destination: &Path,
+    exclude: &[&str],
+) -> Result<CopyResult, std::io::Error> {
     create_dir_all(destination)?;
-    let mut total_bytes: u64 = 0;
+    let mut result = CopyResult {
+        bytes_copied: 0,
+        files_copied: 0,
+        files_excluded: 0,
+        errors: Vec::new(),
+    };
     let mut stack = vec![source.to_path_buf()];
 
     while let Some(current_path) = stack.pop() {
@@ -66,6 +98,7 @@ fn copy_dir(source: &Path, destination: &Path, exclude: &[&str]) -> Result<u64, 
             let file_name = entry.file_name();
             let name = file_name.to_string_lossy();
             if exclude.iter().any(|c| matches_pattern(*c, &name)) {
+                result.files_excluded += 1;
                 continue;
             }
             let filetype = entry.file_type()?;
@@ -77,13 +110,18 @@ fn copy_dir(source: &Path, destination: &Path, exclude: &[&str]) -> Result<u64, 
                 stack.push(entry_path);
             } else {
                 match std::fs::copy(entry.path(), &new_dest) {
-                    Ok(bytes) => total_bytes += bytes,
-                    Err(e) => println!("Error: {}", e),
+                    Ok(bytes) => {
+                        result.bytes_copied += bytes;
+                        result.files_copied += 1;
+                    }
+                    Err(e) => result
+                        .errors
+                        .push(format!("{}: {}", entry.path().display(), e)),
                 }
             }
         }
     }
-    Ok(total_bytes)
+    Ok(result)
 }
 fn matches_pattern(pattern: &str, name: &str) -> bool {
     if pattern.starts_with("*.") {
