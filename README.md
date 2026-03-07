@@ -32,33 +32,35 @@ cargo build --release
 
 ## Usage
 
-```bash
-# Copy a file
-cpr source.txt destination.txt
-
-# Copy a file into a directory
-cpr report.pdf ./backup/
-
-# Copy a directory (prompts for confirmation)
-cpr ./my-project ./backup/my-project
-
-# Copy a directory, excluding patterns
-cpr ./my-project ./backup/my-project --exclude node_modules,.git,*.log
-
-# Short flag
-cpr ./src ./dist -e target,*.tmp
+```
+cpr <SOURCE> <DESTINATION> [OPTIONS]
 ```
 
-### Exclude patterns
+```powershell
+# Copy a file
+cpr report.pdf D:\backup\
 
-Comma-separated, passed via `--exclude` / `-e`:
+# Copy a directory (prompts for confirmation)
+cpr C:\project\ D:\backup\project\
+
+# Copy with exclude patterns and skip confirmation
+cpr C:\project\ D:\backup\project\ -e node_modules,.git,*.log -y
+```
+
+### Options
+
+| Flag | Description |
+|---|---|
+| `-e, --exclude <PATTERNS>` | Comma-separated patterns to exclude |
+| `-y, --yes` | Skip confirmation prompt for directory copies |
+
+### Exclude patterns
 
 | Pattern | Matches |
 |---|---|
 | `node_modules` | Exact directory/file name |
 | `.git` | Exact directory/file name |
 | `*.log` | Any file ending in `.log` |
-| `*.tmp` | Any file ending in `.tmp` |
 
 ## License
 

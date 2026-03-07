@@ -6,13 +6,17 @@ use std::{
 };
 
 #[derive(Parser)]
-#[command(name = "cpr", about = "A better copy tool")]
+#[command(
+    name = "cpr",
+    about = "A file and directory copy tool with --exclude support",
+    after_help = "Examples:\n  cpr report.pdf D:\\backup\\\n  cpr C:\\project\\ D:\\backup\\project\\ -e node_modules,.git,*.log -y"
+)]
 struct Args {
-    /// Source path
+    /// Source file or directory
     source: String,
     /// Destination path
     destination: String,
-    /// Comma-seperated patterns to exclude
+    /// Comma-separated patterns to exclude
     #[arg(short, long)]
     exclude: Option<String>,
     /// Skip confirmation prompt for directory copies
