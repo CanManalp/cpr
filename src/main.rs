@@ -5,21 +5,18 @@ use std::{
     fs::{self, create_dir_all},
     io,
     path::{Path, PathBuf},
-    sync::Mutex,
-    sync::atomic::{AtomicU64, Ordering},
 };
 
 #[derive(Parser)]
 #[command(
-    name = "cpr",
     about = "A file and directory copy tool with --exclude support",
     after_help = "Examples:\n  cpr report.pdf D:\\backup\\\n  cpr C:\\project\\ D:\\backup\\project\\ -e node_modules,.git,*.log -y\n  cpr C:\\project\\ D:\\backup\\project\\ -e node_modules -n"
 )]
 struct Args {
     /// Source file or directory
-    source: String,
+    source: PathBuf,
     /// Destination path
-    destination: String,
+    destination: PathBuf,
     /// Comma-separated patterns to exclude
     #[arg(short, long)]
     exclude: Option<String>,
@@ -33,8 +30,6 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    let source_path = Path::new(&args.source);
-    let dest_path = Path::new(&args.destination);
 
     let excludes: Vec<&str> = match &args.exclude {
         Some(e) => e.split(',').collect(),
@@ -43,72 +38,74 @@ fn main() {
     let yes = args.yes;
     let dry = args.dry_run;
 
-    if source_path.is_dir() {
-        let mut input = String::new();
+    if args.source.is_dir() {
         if !yes && !dry {
-            println!("Copy directory '{}' and all contents? (y/n)", args.source);
+            println!(
+                "Copy directory '{}' and all contents? (y/n)",
+                args.source.display()
+            );
+            let mut input = String::new();
             io::stdin().read_line(&mut input).unwrap();
+            if input.trim() != "y" {
+                return;
+            }
         }
 
-        if input.trim() == "y" || yes || dry {
-            match copy_dir(source_path, dest_path, &excludes, dry) {
-                Ok(copy_result) => {
-                    if dry {
-                        if !copy_result.files_to_be_copied.is_empty() {
-                            println!("{}", "Files To Be Copied :".green());
-                            println!("----------------------------");
-                            for file in copy_result.files_to_be_copied {
-                                println!("{}", file)
-                            }
+        match copy_dir(&args.source, &args.destination, &excludes, dry) {
+            Ok(copy_result) => {
+                if dry {
+                    if !copy_result.files_to_be_copied.is_empty() {
+                        println!("{}", "Files To Be Copied :".green());
+                        println!("----------------------------");
+                        for file in copy_result.files_to_be_copied {
+                            println!("{}", file)
                         }
-                        if !copy_result.files_to_be_excluded.is_empty() {
-                            println!("{}", "Files To Be Excluded :".yellow());
-                            println!("----------------------------");
-                            for exc in copy_result.files_to_be_excluded {
-                                println!("{}", exc)
-                            }
-                        }
-                    } else {
-                        println!(
-                            "{} {}",
-                            "Total Bytes Copied =".green(),
-                            copy_result.bytes_copied.to_string().green()
-                        );
-                        println!(
-                            "{} {}",
-                            "Total Files Copied =".green(),
-                            copy_result.files_copied.to_string().green()
-                        );
-                        println!(
-                            "{} {}",
-                            "Total Files Excluded =".yellow(),
-                            copy_result.files_excluded.to_string().yellow()
-                        );
                     }
-                    if !copy_result.errors.is_empty() {
-                        for err in copy_result.errors {
-                            println!("Error: {}", err.red())
+                    if !copy_result.files_to_be_excluded.is_empty() {
+                        println!("{}", "Files To Be Excluded :".yellow());
+                        println!("----------------------------");
+                        for exc in copy_result.files_to_be_excluded {
+                            println!("{}", exc)
                         }
+                    }
+                } else {
+                    println!(
+                        "{} {}",
+                        "Total Bytes Copied =".green(),
+                        copy_result.bytes_copied.to_string().green()
+                    );
+                    println!(
+                        "{} {}",
+                        "Total Files Copied =".green(),
+                        copy_result.files_copied.to_string().green()
+                    );
+                    println!(
+                        "{} {}",
+                        "Total Files Excluded =".yellow(),
+                        copy_result.files_excluded.to_string().yellow()
+                    );
+                }
+                if !copy_result.errors.is_empty() {
+                    for err in copy_result.errors {
+                        println!("Error: {}", err.red())
                     }
                 }
-                Err(e) => println!("Error: {}", e.to_string().red()),
             }
-        } else {
-            return;
+            Err(e) => println!("Error: {}", e.to_string().red()),
         }
-    } else if source_path.is_file() {
-        let final_dest = if dest_path.is_dir() {
-            dest_path.join(source_path.file_name().unwrap())
+    } else if args.source.is_file() {
+        let final_dest = if args.destination.is_dir() {
+            args.destination.join(args.source.file_name().unwrap())
         } else {
-            dest_path.to_path_buf()
+            args.destination
         };
 
-        match std::fs::copy(source_path, final_dest) {
+        match std::fs::copy(args.source, final_dest) {
             Ok(bytes) => println!("Copied {} bytes", bytes),
             Err(e) => println!("Error: {}", e.to_string().red()),
         }
     } else {
-        println!("Source not found: {}", args.source);
+        println!("Source not found: {}", args.source.display());
     }
 }
 
@@ -150,7 +147,7 @@ fn copy_dir(
             let name = file_name.to_string_lossy();
             let entry_path = entry.path();
             let relative = entry_path.strip_prefix(source).unwrap();
-            if exclude.iter().any(|c| matches_pattern(*c, &name)) {
+            if exclude.iter().any(|c| matches_pattern(c, &name)) {
                 if dry_run {
                     result
                         .files_to_be_excluded
