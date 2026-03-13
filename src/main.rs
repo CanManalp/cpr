@@ -5,6 +5,8 @@ use std::{
     fs::{self, create_dir_all},
     io,
     path::{Path, PathBuf},
+    sync::Mutex,
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 #[derive(Parser)]
