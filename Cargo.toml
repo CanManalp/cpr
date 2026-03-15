@@ -10,4 +10,5 @@ repository = "https://github.com/canmanalp/cpr"
 [dependencies]
 clap = { version = "4.5.60", features = ["derive"] }
 colored = "3.1.1"
+globset = "0.4.18"
 rayon = "1.11.0"

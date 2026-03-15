@@ -1,8 +1,8 @@
 # cpr
 
-A file and directory copy tool with `--exclude` support and parallel copying. Built because PowerShell's `Copy-Item` doesn't have one.
+A fast file and directory copy tool with glob pattern filtering and parallel copying. Built because PowerShell's `Copy-Item` doesn't have one.
 
-- **Simple exclude patterns** — `-e node_modules,.git,*.log` instead of robocopy's `/XD node_modules /XF *.log`
+- **Glob pattern filtering** — `-e node_modules,.git,*.log` or `-i *.rs` instead of robocopy's `/XD node_modules /XF *.log`
 - **Parallel by default** — copies files concurrently using all available cores
 - **Minimal overhead** — no ACLs, no retries, no attribute preservation, just copies bytes
 
@@ -47,28 +47,48 @@ cpr report.pdf D:\backup\
 # Copy a directory (prompts for confirmation)
 cpr C:\project\ D:\backup\project\
 
-# Copy with exclude patterns and skip confirmation
-cpr C:\project\ D:\backup\project\ -e node_modules,.git,*.log -y
+# Exclude patterns — skip files and folders that match
+cpr C:\project\ D:\backup\project\ -e node_modules,.git,target -y
+
+# Include patterns — copy only files that match
+cpr C:\project\ D:\backup\project\ -i *.rs,*.toml
+
+# Copy only a specific folder
+cpr C:\project\ D:\backup\project\ -i src/**
+
+# Combine include and exclude
+cpr C:\project\ D:\backup\project\ -i *.rs,*.toml -e tests/**
 
 # Preview what would be copied (no files are written)
-cpr C:\project\ D:\backup\project\ -e node_modules,.git,*.log -n
+cpr C:\project\ D:\backup\project\ -e node_modules -n
 ```
 
 ### Options
 
 | Flag | Description |
 |---|---|
-| `-e, --exclude <PATTERNS>` | Comma-separated patterns to exclude |
+| `-e, --exclude <PATTERNS>` | Patterns to exclude (files and directories) |
+| `-i, --include <PATTERNS>` | Patterns to include (only matching files are copied) |
 | `-y, --yes` | Skip confirmation prompt for directory copies |
 | `-n, --dry-run` | Preview what would be copied without copying |
 
-### Exclude patterns
+Patterns can be comma-separated (`-e *.log,*.tmp`) or passed as multiple flags (`-e *.log -e *.tmp`).
 
-| Pattern | Matches |
+### Glob patterns
+
+| Pattern | What it does |
 |---|---|
-| `node_modules` | Exact directory/file name |
-| `.git` | Exact directory/file name |
-| `*.log` | Any file ending in `.log` |
+| `node_modules` | Matches exact name |
+| `*.log` | Matches files by extension |
+| `*.rs,*.toml` | Matches multiple extensions |
+| `**/*.test.js` | Matches in any subdirectory |
+| `src/**` | Matches everything inside `src` |
+
+### How include and exclude interact
+
+- **Exclude** applies to both files and directories — excluded directories are skipped entirely
+- **Include** only filters files — directories are always walked so matching files inside them can be found
+- When both are used, exclude is checked first
 
 ## License
 

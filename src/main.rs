@@ -1,5 +1,6 @@
 use clap::Parser;
 use colored::*;
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use rayon::prelude::*;
 use std::{
     fs::{self, create_dir_all},
@@ -11,17 +12,20 @@ use std::{
 
 #[derive(Parser)]
 #[command(
-    about = "A file and directory copy tool with --exclude support",
-    after_help = "Examples:\n  cpr report.pdf D:\\backup\\\n  cpr C:\\project\\ D:\\backup\\project\\ -e node_modules,.git,*.log -y\n  cpr C:\\project\\ D:\\backup\\project\\ -e node_modules -n"
+    about = "A fast file and directory copy tool with glob pattern filtering",
+    after_help = "Examples:\n  cpr report.pdf D:\\backup\\\n  cpr src dst -e .git,node_modules,target -y\n  cpr src dst -e *.log,*.tmp -n\n  cpr src dst -i *.rs                        # only .rs files\n  cpr src dst -i src/**                      # only the src folder\n  cpr src dst -i *.rs,*.toml -e tests/**     # .rs and .toml files, skip tests\n\nGlob patterns:\n  *.log         matches files by extension\n  *.rs,*.toml   matches multiple patterns\n  **/*.test.js  matches in any subdirectory\n  src/**        matches everything inside src"
 )]
 struct Args {
     /// Source file or directory
     source: PathBuf,
     /// Destination path
     destination: PathBuf,
-    /// Comma-separated patterns to exclude
-    #[arg(short, long)]
-    exclude: Option<String>,
+    /// Patterns to exclude (supports globs like *.log, **/*.tmp)
+    #[arg(short, long, value_delimiter = ',')]
+    exclude: Vec<String>,
+    /// Patterns to include — only matching files are copied (same glob syntax as exclude)
+    #[arg(short, long, value_delimiter = ',')]
+    include: Vec<String>,
     /// Skip confirmation prompt for directory copies
     #[arg(short, long)]
     yes: bool,
@@ -32,14 +36,22 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-
-    let excludes: Vec<&str> = match &args.exclude {
-        Some(e) => e.split(',').collect(),
-        None => vec![],
-    };
     let yes = args.yes;
     let dry = args.dry_run;
-
+    let exclude_set = match build_glob_set(&args.exclude) {
+        Ok(set) => set,
+        Err(e) => {
+            println!("Invalid exclude pattern: {}", e.to_string().red());
+            return;
+        }
+    };
+    let include_set = match build_glob_set(&args.include) {
+        Ok(set) => set,
+        Err(e) => {
+            println!("Invalid include pattern: {}", e.to_string().red());
+            return;
+        }
+    };
     if args.source.is_dir() {
         if !yes && !dry {
             println!(
@@ -53,7 +65,13 @@ fn main() {
             }
         }
 
-        match copy_dir(&args.source, &args.destination, &excludes, dry) {
+        match copy_dir(
+            &args.source,
+            &args.destination,
+            &exclude_set,
+            &include_set,
+            dry,
+        ) {
             Ok(copy_result) => {
                 if dry {
                     if !copy_result.files_to_be_copied.is_empty() {
@@ -121,13 +139,14 @@ struct CopyResult {
 }
 
 fn copy_dir(
-    source: &Path,
-    destination: &Path,
-    exclude: &[&str],
+    src_root: &Path,
+    dest_root: &Path,
+    exclude: &GlobSet,
+    include: &GlobSet,
     dry_run: bool,
 ) -> Result<CopyResult, std::io::Error> {
     if !dry_run {
-        create_dir_all(destination)?;
+        create_dir_all(dest_root)?;
     }
     let mut result = CopyResult {
         bytes_copied: 0,
@@ -140,38 +159,45 @@ fn copy_dir(
 
     // Phase 1: Walk — collect files and dirs (sequential)
     let mut files_to_copy: Vec<(PathBuf, PathBuf)> = Vec::new(); // (source, dest)
-    let mut stack = vec![source.to_path_buf()];
+    let mut stack = vec![src_root.to_path_buf()];
 
     while let Some(current_path) = stack.pop() {
-        for entry in fs::read_dir(&current_path)? {
-            let entry = entry?;
-            let file_name = entry.file_name();
-            let name = file_name.to_string_lossy();
-            let entry_path = entry.path();
-            let relative = entry_path.strip_prefix(source).unwrap();
-            if exclude.iter().any(|c| matches_pattern(c, &name)) {
+        for dir_entry in fs::read_dir(&current_path)? {
+            let dir_entry = dir_entry?;
+            let src_path = dir_entry.path();
+            let relative_path = src_path.strip_prefix(src_root).unwrap();
+            let rel_str = relative_path.to_string_lossy();
+
+            // Exclude applies to both files and directories
+            if !exclude.is_empty() && exclude.is_match(relative_path) {
                 if dry_run {
-                    result
-                        .files_to_be_excluded
-                        .push(relative.to_string_lossy().to_string());
+                    result.files_to_be_excluded.push(rel_str.to_string());
                 } else {
                     result.files_excluded += 1;
                 }
                 continue;
             }
-            let filetype = entry.file_type()?;
-            let new_dest = destination.join(relative);
+
+            let filetype = dir_entry.file_type()?;
+            let dest_path = dest_root.join(relative_path);
+
             if filetype.is_dir() {
+                // Always walk into non-excluded directories
                 if !dry_run {
-                    create_dir_all(&new_dest)?;
+                    create_dir_all(&dest_path)?;
                 }
-                stack.push(entry_path);
+                stack.push(src_path);
+            } else if !include.is_empty() && !include.is_match(relative_path) {
+                // Include only filters files — unmatched files are excluded
+                if dry_run {
+                    result.files_to_be_excluded.push(rel_str.to_string());
+                } else {
+                    result.files_excluded += 1;
+                }
             } else if dry_run {
-                result
-                    .files_to_be_copied
-                    .push(relative.to_string_lossy().to_string());
+                result.files_to_be_copied.push(rel_str.to_string());
             } else {
-                files_to_copy.push((entry_path, new_dest));
+                files_to_copy.push((src_path, dest_path));
             }
         }
     }
@@ -197,10 +223,10 @@ fn copy_dir(
     }
     Ok(result)
 }
-fn matches_pattern(pattern: &str, name: &str) -> bool {
-    if pattern.starts_with("*.") {
-        name.ends_with(&pattern[1..])
-    } else {
-        name == pattern
+fn build_glob_set(patterns: &[String]) -> Result<GlobSet, globset::Error> {
+    let mut builder: GlobSetBuilder = GlobSetBuilder::new();
+    for pattern in patterns {
+        builder.add(Glob::new(pattern)?);
     }
+    builder.build()
 }
