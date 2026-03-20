@@ -1,6 +1,6 @@
 # cpr
 
-A fast file and directory copy tool with glob pattern filtering and parallel copying. Built because PowerShell's `Copy-Item` doesn't have one.
+A fast file and directory copy tool with glob pattern filtering and parallel copying. Built because PowerShell's `Copy-Item` doesn't have those.
 
 - **Glob pattern filtering** — `-e node_modules,.git,*.log` or `-i *.rs` instead of robocopy's `/XD node_modules /XF *.log`
 - **Parallel by default** — copies files concurrently using all available cores
