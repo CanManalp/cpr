@@ -1,13 +1,15 @@
 use clap::Parser;
 use colored::*;
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use indicatif::{HumanBytes, HumanDuration, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::{
     fs::{self, create_dir_all},
-    io,
+    io::{self, IsTerminal},
     path::{Path, PathBuf},
     sync::Mutex,
     sync::atomic::{AtomicU64, Ordering},
+    time::Instant,
 };
 
 #[derive(Parser)]
@@ -65,12 +67,14 @@ fn main() {
             }
         }
 
+        let show_progress = !dry && io::stderr().is_terminal();
         match copy_dir(
             &args.source,
             &args.destination,
             &exclude_set,
             &include_set,
             dry,
+            show_progress,
         ) {
             Ok(copy_result) => {
                 if dry {
@@ -89,21 +93,28 @@ fn main() {
                         }
                     }
                 } else {
+                    let elapsed = copy_result.elapsed.unwrap();
+                    let secs = elapsed.as_secs_f64();
+                    let throughput = if secs > 0.0 {
+                        (copy_result.bytes_copied as f64 / secs) as u64
+                    } else {
+                        copy_result.bytes_copied
+                    };
                     println!(
-                        "{} {}",
-                        "Total Bytes Copied =".green(),
-                        copy_result.bytes_copied.to_string().green()
+                        "{} {} {} {} {}",
+                        "Copied".green(),
+                        HumanBytes(copy_result.bytes_copied).to_string().green(),
+                        format!("in {}", HumanDuration(elapsed)).green(),
+                        format!("({}/s)", HumanBytes(throughput)).green(),
+                        format!("[{} files]", copy_result.files_copied).green(),
                     );
-                    println!(
-                        "{} {}",
-                        "Total Files Copied =".green(),
-                        copy_result.files_copied.to_string().green()
-                    );
-                    println!(
-                        "{} {}",
-                        "Total Files Excluded =".yellow(),
-                        copy_result.files_excluded.to_string().yellow()
-                    );
+                    if copy_result.files_excluded > 0 {
+                        println!(
+                            "{} {}",
+                            "Files Excluded =".yellow(),
+                            copy_result.files_excluded.to_string().yellow()
+                        );
+                    }
                 }
                 if !copy_result.errors.is_empty() {
                     for err in copy_result.errors {
@@ -135,6 +146,7 @@ struct CopyResult {
     files_excluded: u64,
     files_to_be_copied: Vec<String>,
     files_to_be_excluded: Vec<String>,
+    elapsed: Option<std::time::Duration>,
     errors: Vec<String>,
 }
 
@@ -144,6 +156,7 @@ fn copy_dir(
     exclude: &GlobSet,
     include: &GlobSet,
     dry_run: bool,
+    show_progress: bool,
 ) -> Result<CopyResult, std::io::Error> {
     if !dry_run {
         create_dir_all(dest_root)?;
@@ -154,12 +167,14 @@ fn copy_dir(
         files_excluded: 0,
         files_to_be_copied: Vec::new(),
         files_to_be_excluded: Vec::new(),
+        elapsed: None,
         errors: Vec::new(),
     };
 
     // Phase 1: Walk — collect files and dirs (sequential)
     let mut files_to_copy: Vec<(PathBuf, PathBuf)> = Vec::new(); // (source, dest)
     let mut stack = vec![src_root.to_path_buf()];
+    let mut total_bytes: u64 = 0;
 
     while let Some(current_path) = stack.pop() {
         for dir_entry in fs::read_dir(&current_path)? {
@@ -197,6 +212,7 @@ fn copy_dir(
             } else if dry_run {
                 result.files_to_be_copied.push(rel_str.to_string());
             } else {
+                total_bytes += dir_entry.metadata()?.len();
                 files_to_copy.push((src_path, dest_path));
             }
         }
@@ -204,19 +220,37 @@ fn copy_dir(
 
     // Phase 2: Copy — parallel file copies
     if !dry_run {
+        let pb = if show_progress {
+            let pb = ProgressBar::new(total_bytes);
+            pb.set_style(
+                ProgressStyle::with_template(
+                    "{bar:40.green} {bytes}/{total_bytes} ({bytes_per_sec}) [{elapsed}]",
+                )
+                .unwrap(),
+            );
+            pb.enable_steady_tick(std::time::Duration::from_millis(100));
+            pb
+        } else {
+            ProgressBar::hidden()
+        };
+
         let bytes_copied = AtomicU64::new(0);
         let files_copied = AtomicU64::new(0);
         let errors: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let start = Instant::now();
         files_to_copy
             .par_iter()
             .for_each(|(src, dest)| match std::fs::copy(src, dest) {
                 Ok(bytes) => {
                     bytes_copied.fetch_add(bytes, Ordering::Relaxed);
                     files_copied.fetch_add(1, Ordering::Relaxed);
+                    pb.inc(bytes);
                 }
 
                 Err(e) => errors.lock().unwrap().push(e.to_string()),
             });
+        pb.finish_and_clear();
+        result.elapsed = Some(start.elapsed());
         result.bytes_copied = bytes_copied.load(Ordering::Relaxed);
         result.files_copied = files_copied.load(Ordering::Relaxed);
         result.errors = errors.into_inner().unwrap();

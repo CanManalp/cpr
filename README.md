@@ -4,7 +4,11 @@ A fast file and directory copy tool with glob pattern filtering and parallel cop
 
 - **Glob pattern filtering** — `-e node_modules,.git,*.log` or `-i *.rs` instead of robocopy's `/XD node_modules /XF *.log`
 - **Parallel by default** — copies files concurrently using all available cores
+- **Progress bar** — real-time progress with bytes, throughput, and elapsed time (auto-hides when piped)
+- **Human-readable output** — `Copied 2.44 GiB in 32 seconds (75.65 MiB/s) [70 files]`
 - **Minimal overhead** — no ACLs, no retries, no attribute preservation, just copies bytes
+
+![cpr progress bar](cpr_progress_bar.png)
 
 ## Installation
 
