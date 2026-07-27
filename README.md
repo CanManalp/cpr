@@ -80,13 +80,16 @@ Patterns can be comma-separated (`-e *.log,*.tmp`) or passed as multiple flags (
 
 ### Glob patterns
 
+Patterns follow the gitignore rule: a pattern **without** `/` matches entry names at any depth; a pattern **with** `/` matches against the path relative to the source root.
+
 | Pattern | What it does |
 |---|---|
-| `node_modules` | Matches exact name |
-| `*.log` | Matches files by extension |
+| `node_modules` | Matches files/dirs named `node_modules` at any depth |
+| `*.log` | Matches files by extension, at any depth |
 | `*.rs,*.toml` | Matches multiple extensions |
 | `**/*.test.js` | Matches in any subdirectory |
-| `src/**` | Matches everything inside `src` |
+| `src/**` | Matches everything inside the top-level `src` |
+| `-i src` | Include: copies every file under any folder named `src` |
 
 ### How include and exclude interact
 

@@ -47,6 +47,9 @@ cargo run -- src dst -e .git   # quick test
 
 Improvements to make one by one (in priority order):
 
+### ~~0. BUG — bare-name patterns (`-e bin`) only match at top level~~ (fixed 2026-07-27)
+- ~~`-e bin,obj` silently fails to exclude nested `proj/bin`, `proj/obj`~~ Fixed with gitignore-style name-vs-path pattern split for both `-e` and `-i` (patterns without `/` match entry names at any depth). Tests added in `main.rs` (`#[cfg(test)]`). `FIX-bare-name-patterns.md` can be deleted after release.
+
 ### ~~1. Code cleanup~~ (done)
 
 ### ~~2. Fix silent error swallowing~~ (done)
@@ -59,33 +62,36 @@ Improvements to make one by one (in priority order):
 
 ### ~~6. Parallel copying with `rayon`~~ (done)
 
-### 7. Human-readable sizes + elapsed time
-- Show `1.38 GiB` instead of raw byte counts
-- Show elapsed time and throughput: `1.38 GiB in 4.2s (336 MB/s)`
+### ~~7. Human-readable sizes + elapsed time~~ (done)
+- ~~Show `1.38 GiB` instead of raw byte counts~~
+- ~~Show elapsed time and throughput: `1.38 GiB in 4.2s (336 MB/s)`~~
 
 ### 8. Verbose mode (`-v`)
 - Print each file path as it's copied
 - Essential for debugging exclude patterns and verifying large copies
+- Also fix dry-run verbosity: `-n` currently prints the FULL excluded-file list (213 KB of output on a ~2,200-file tree in real use). Default `-n` should print the files to be copied + an excluded **count** (like the real copy does); the full excluded list only with `-n -v`
 
-### 9. Progress bar (`indicatif` crate)
-- Real-time progress: files copied / total, bytes / total, elapsed time
-- Auto-disable when stdout is piped (not a terminal)
-- The #1 most requested feature across all copy tool discussions
+### ~~9. Progress bar (`indicatif` crate)~~ (done)
+- ~~Real-time progress: files copied / total, bytes / total, elapsed time~~
+- ~~Auto-disable when stdout is piped (not a terminal)~~
+- ~~The #1 most requested feature across all copy tool discussions~~
 
 ### 10. `.gitignore`-aware exclude (`--gitignore`)
 - Read `.gitignore` files in the source tree and auto-exclude matching paths
 - Use the `ignore` crate (same one ripgrep uses)
 - Strong developer appeal — no more manually listing `node_modules,.git,target`
 
-### 11. Better glob patterns
-- Support `**`, `*.{log,tmp}`, path-based patterns (`src/**/*.test.js`)
-- Consider `--include` patterns in addition to `--exclude`
-- Use the `globset` crate
+### ~~11. Better glob patterns~~ (done)
+- ~~Support `**`, `*.{log,tmp}`, path-based patterns (`src/**/*.test.js`)~~
+- ~~Consider `--include` patterns in addition to `--exclude`~~
+- ~~Use the `globset` crate~~ (globset 0.4.18; `-i` + `**/memory/**` verified in real use 2026-07-19)
 
-### 12. Skip existing / update mode
+### 12. Skip existing / update mode ← highest-value open item
 - `--skip-existing` — skip files already present at destination (by name + size)
-- `--update` — only copy if source is newer
+- `--update` / `-u` — only copy if source is newer (compare size + mtime)
 - Makes interrupted copies resumable without starting over
+- Killer use case: re-runnable backup refresh — run the SAME full command again and only changed files copy (e.g. keeping a OneDrive backup of `.claude` memory current). Turns cpr from "better Copy-Item" into "the tool for keeping two folders in sync"
+- Combo with dry-run: `cpr src dst -u -n` = "what's stale?" preview — a thing robocopy makes painful
 
 ### 13. Post-copy checksum verification (`--verify`)
 - Hash each file after copying and compare to source
@@ -107,3 +113,8 @@ Improvements to make one by one (in priority order):
 - Explore `CopyFile2` (Windows 10+) with progress callbacks
 - Consider memory-mapped I/O for large files
 - Reflink support (copy-on-write) for future cross-platform support
+
+### 17. Machine-readable result (`--json`)
+- One JSON object on stdout at the end: `{"copied": 227, "excluded": 1963, "bytes": 859146, "errors": 0}`
+- For scripts and AI-agent callers (Claude runs cpr inside sessions now) — lets the caller verify the result from cpr's own output instead of re-listing the destination
+- The `errors` field is the important one: today a partial failure isn't detectable from the summary line
