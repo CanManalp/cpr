@@ -35,6 +35,12 @@ struct Args {
     /// Shows what would be copied without actually copying.
     #[arg(short = 'n', long)]
     dry_run: bool,
+    /// Only copy files that are newer than the destination (compares size and modified time)
+    #[arg(short, long)]
+    update: bool,
+    /// Skip existing files in the destination (only copy new files)
+    #[arg(short, long)]
+    skip_existing: bool,
 }
 
 fn main() {
@@ -76,6 +82,8 @@ fn main() {
             &include_filters,
             dry,
             show_progress,
+            args.skip_existing,
+            args.update,
         ) {
             Ok(copy_result) => {
                 if dry {
@@ -92,6 +100,16 @@ fn main() {
                         for exc in copy_result.files_to_be_excluded {
                             println!("{}", exc)
                         }
+                    }
+                    if copy_result.files_skipped > 0 {
+                        println!(
+                            "{}",
+                            format!(
+                                "Skipped = {} files (up to date)",
+                                copy_result.files_skipped
+                            )
+                            .cyan()
+                        );
                     }
                 } else {
                     let elapsed = copy_result.elapsed.unwrap();
@@ -118,6 +136,16 @@ fn main() {
                                 copy_result.files_excluded, copy_result.dirs_excluded
                             )
                             .yellow()
+                        );
+                    }
+                    if copy_result.files_skipped > 0 {
+                        println!(
+                            "{}",
+                            format!(
+                                "Skipped = {} files (up to date)",
+                                copy_result.files_skipped
+                            )
+                            .cyan()
                         );
                     }
                 }
@@ -150,6 +178,7 @@ struct CopyResult {
     files_copied: u64,
     files_excluded: u64,
     dirs_excluded: u64,
+    files_skipped: u64,
     files_to_be_copied: Vec<String>,
     files_to_be_excluded: Vec<String>,
     elapsed: Option<std::time::Duration>,
@@ -163,6 +192,8 @@ fn copy_dir(
     include: &Filters,
     dry_run: bool,
     show_progress: bool,
+    skip_existing: bool,
+    update: bool,
 ) -> Result<CopyResult, std::io::Error> {
     if !dry_run {
         create_dir_all(dest_root)?;
@@ -172,6 +203,7 @@ fn copy_dir(
         files_copied: 0,
         files_excluded: 0,
         dirs_excluded: 0,
+        files_skipped: 0,
         files_to_be_copied: Vec::new(),
         files_to_be_excluded: Vec::new(),
         elapsed: None,
@@ -218,11 +250,16 @@ fn copy_dir(
                 } else {
                     result.files_excluded += 1;
                 }
-            } else if dry_run {
-                result.files_to_be_copied.push(rel_str.to_string());
             } else {
-                total_bytes += dir_entry.metadata()?.len();
-                files_to_copy.push((src_path, dest_path));
+                let meta = dir_entry.metadata()?;
+                if !should_copy(&meta, &dest_path, skip_existing, update) {
+                    result.files_skipped += 1;
+                } else if dry_run {
+                    result.files_to_be_copied.push(rel_str.to_string());
+                } else {
+                    total_bytes += meta.len();
+                    files_to_copy.push((src_path, dest_path));
+                }
             }
         }
     }
@@ -316,6 +353,35 @@ fn is_included(rel: &Path, filters: &Filters) -> bool {
             .any(|c| filters.name_set.is_match(c.as_os_str()))
 }
 
+/// Decides whether a source file should be copied over `dest_path`,
+/// based on the `--skip-existing` and `--update` flags.
+fn should_copy(
+    src_meta: &fs::Metadata,
+    dest_path: &Path,
+    skip_existing: bool,
+    update: bool,
+) -> bool {
+    if !skip_existing && !update {
+        return true;
+    }
+    let attr = match fs::metadata(dest_path) {
+        Ok(result) => result,
+        Err(_error) => return true,
+    };
+    let same_size = src_meta.len() == attr.len();
+    if skip_existing && same_size {
+        return false;
+    }
+    let newer = match (src_meta.modified(), attr.modified()) {
+        (Ok(src_time), Ok(dest_time)) => src_time > dest_time,
+        _ => true,
+    };
+    if update && !newer && same_size {
+        return false;
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -390,5 +456,41 @@ mod tests {
         let f = filters(&["src/**"]);
         assert!(is_included(Path::new("src/main.rs"), &f));
         assert!(!is_included(Path::new("other/main.rs"), &f));
+    }
+
+    #[test]
+    fn copies_when_destination_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("a.txt");
+        fs::write(&src, b"hello").unwrap();
+        let src_meta = fs::metadata(&src).unwrap();
+        let missing_dest = dir.path().join("missing.txt");
+        assert!(should_copy(&src_meta, &missing_dest, true, false));
+        assert!(should_copy(&src_meta, &missing_dest, false, true));
+    }
+
+    #[test]
+    fn skip_existing_skips_same_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("a.txt");
+        let dest = dir.path().join("b.txt");
+        fs::write(&src, b"hello").unwrap();
+        fs::write(&dest, b"olleh").unwrap(); // same size, content irrelevant
+        let src_meta = fs::metadata(&src).unwrap();
+        assert!(!should_copy(&src_meta, &dest, true, false));
+
+        fs::write(&dest, b"hi").unwrap(); // size differs: interrupted partial copy
+        assert!(should_copy(&src_meta, &dest, true, false));
+    }
+
+    #[test]
+    fn update_skips_when_dest_is_up_to_date() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("a.txt");
+        let dest = dir.path().join("b.txt");
+        fs::write(&src, b"hello").unwrap();
+        fs::copy(&src, &dest).unwrap(); // preserves mtime on Windows
+        let src_meta = fs::metadata(&src).unwrap();
+        assert!(!should_copy(&src_meta, &dest, false, true));
     }
 }

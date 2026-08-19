@@ -86,12 +86,10 @@ Improvements to make one by one (in priority order):
 - ~~Consider `--include` patterns in addition to `--exclude`~~
 - ~~Use the `globset` crate~~ (globset 0.4.18; `-i` + `**/memory/**` verified in real use 2026-07-19)
 
-### 12. Skip existing / update mode ← highest-value open item
-- `--skip-existing` — skip files already present at destination (by name + size)
-- `--update` / `-u` — only copy if source is newer (compare size + mtime)
-- Makes interrupted copies resumable without starting over
-- Killer use case: re-runnable backup refresh — run the SAME full command again and only changed files copy (e.g. keeping a OneDrive backup of `.claude` memory current). Turns cpr from "better Copy-Item" into "the tool for keeping two folders in sync"
-- Combo with dry-run: `cpr src dst -u -n` = "what's stale?" preview — a thing robocopy makes painful
+### ~~12. Skip existing / update mode~~ (done 2026-08-19)
+- ~~`--skip-existing` — skip files already present at destination (by name + size)~~
+- ~~`--update` / `-u` — only copy if source is newer (compare size + mtime)~~
+- Implemented as `should_copy()` in `main.rs`: `-s` compares name + size only (resume use case), `-u` copies when size differs or source mtime is later (re-run sync use case). Both work with `-n` (`-u -n` = "what's stale?" preview). Skipped count shown as `Skipped = N files (up to date)`. Unit tests use `tempfile` (dev-dependency).
 
 ### 13. Post-copy checksum verification (`--verify`)
 - Hash each file after copying and compare to source
